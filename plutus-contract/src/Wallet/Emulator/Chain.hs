@@ -123,7 +123,7 @@ validateBlock slot@(Slot s) idx txns =
         -- Select those transactions that can be validated in the
         -- current slot
         (eligibleTxns1, rest) = partition (canValidateNow slot) txns
-        eligibleTxns = trace ("eligibleTxns " <> show eligibleTxns1) eligibleTxns1
+        eligibleTxns = {- trace ("eligibleTxns " <> show eligibleTxns1) -} eligibleTxns1
 
         -- Validate eligible transactions, updating the UTXO index each time
         (processed, idx') =
@@ -146,7 +146,7 @@ validateBlock slot@(Slot s) idx txns =
 -- | Check whether the given transaction can be validated in the given slot.
 canValidateNow :: Slot -> Tx -> Bool
 canValidateNow slot tx = do
-    trace (show slot <> show (txValidRange tx)) $ Interval.member slot (txValidRange tx)
+    {- trace (show slot <> show (txValidRange tx)) $ -} Interval.member slot (txValidRange tx)
 
 mkValidationEvent :: Tx -> Maybe Index.ValidationError -> ChainEvent
 mkValidationEvent t result =
