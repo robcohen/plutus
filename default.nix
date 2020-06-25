@@ -222,7 +222,7 @@ in rec {
       };
   });
 
-  inherit (haskell.packages.plutus-scb.components.exes) plutus-game plutus-currency;
+  inherit (haskell.packages.plutus-scb.components.exes) plutus-game plutus-currency plutus-atomic-swap;
 
   plutus-scb = pkgs.recurseIntoAttrs (rec {
     server-invoker = set-git-rev haskell.packages.plutus-scb.components.exes.plutus-scb;
@@ -248,6 +248,117 @@ in rec {
         name = (pkgs.lib.importJSON packageJSON).name;
         checkPhase = ''node -e 'require("./output/Test.Main").main()' '';
       };
+    demo = let 
+              mkconf = conf: pkgs.writeTextFile {
+                name = "${conf.configname}.yaml";
+                text = ''
+                dbConfig:
+                    dbConfigFile: ${conf.configname}.db
+                    dbConfigPoolSize: 20
+
+                scbWebserverConfig:
+                  baseUrl: http://localhost:${conf.webserver-port}
+                  staticDir: ${plutus-scb.client}
+
+                walletServerConfig:
+                  baseUrl: http://localhost:${conf.walletserver-port}
+                  wallet: 
+                    getWallet: ${conf.wallet}
+
+                nodeServerConfig:
+                  mscBaseUrl: http://localhost:${conf.nodeserver-port}
+                  mscSlotLength: 5
+                  mscRandomTxInterval: 20000000
+                  mscBlockReaper:
+                    brcInterval: 6000000
+                    brcBlocksToKeep: 100000
+                  mscInitialTxWallets:
+                    - getWallet: 1
+                    - getWallet: 2
+                    - getWallet: 3
+
+                chainIndexConfig:
+                  ciBaseUrl: http://localhost:${conf.chain-index-port}
+
+                signingProcessConfig:
+                  spBaseUrl: http://localhost:${conf.signing-process-port}
+                  spWallet: 
+                    getWallet: ${conf.wallet}
+                '';
+              };
+              node-port = "8082"; # needs to be the same for all PABs
+              scb = "${haskell.packages.plutus-scb.components.exes.plutus-scb}/bin/plutus-scb";
+
+              primary = {
+                configname = "demo-primary";
+                webserver-port = "8080";
+                walletserver-port = "8081";
+                nodeserver-port = "${node-port}";
+                chain-index-port = "8083";
+                signing-process-port = "8084";
+                wallet = "1";
+              };
+
+              secondary = { 
+                configname = "demo-secondary";
+                webserver-port = "8085";
+                walletserver-port = "8086";
+                nodeserver-port = "${node-port}"; 
+                chain-index-port = "8087";
+                signing-process-port = "8088";
+                wallet = "2";
+                };
+
+              config-primary = mkconf primary;
+              config-secondary = mkconf secondary;
+
+              process-outboxes = pkgs.writeTextFile {
+                  name = "process-outboxes.sh";
+                  text = ''
+                  while [ 1 ]
+                  do
+                      ${scb} --config=${config-primary} contracts process-outboxes
+                      ${scb} --config=${config-secondary} contracts process-outboxes
+                      sleep 3
+                  done
+                  '';
+                  executable = true;
+                };
+
+              start-all-servers = pkgs.writeTextFile {
+                  name = "start-all-servers.sh";
+                  text = ''
+                  rm -f ${primary.configname}.db
+                  ${scb} --config=${config-primary} migrate
+                  ${scb} --config=${config-primary} contracts install --path ${plutus-currency}/bin/plutus-currency
+                  ${scb} --config=${config-primary} contracts install --path ${plutus-atomic-swap}/bin/plutus-atomic-swap
+                  ${scb} --config=${config-primary} all-servers
+                  '';
+                  executable = true;
+                };
+
+              start-second-scb = pkgs.writeTextFile {
+                  name = "start-second-scb.sh";
+                  text = ''
+                  rm -f ${secondary.configname}.db
+                  ${scb} --config=${config-secondary} migrate
+                  ${scb} --config=${config-secondary} contracts install --path ${plutus-atomic-swap}/bin/plutus-atomic-swap
+                  ${scb} --config=${config-secondary} client-services
+                  '';
+                  executable = true;
+                };
+
+          in pkgs.stdenv.mkDerivation {
+            name = "plutus-scb-demo";
+            phases = "installPhase";
+            installPhase = ''
+              mkdir -p $out
+              cd $out
+              ln ${start-all-servers} start-all-servers.sh
+              ln ${start-second-scb} start-second-scb.sh
+              ln ${process-outboxes} process-outboxes.sh
+            '';
+          }; 
   });
 
   docker = rec {
